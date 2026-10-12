@@ -1,0 +1,7 @@
+[
+ {"intent": "price", "keywords": ["sneakers", "shoe", "shoes"], "answer": "Our sneakers start from NGN 25,000. Full price list: https://example.com/prices"},
+ {"intent": "price", "keywords": ["bag", "bags", "tote"], "answer": "Bags range from NGN 18,000 to NGN 45,000 depending on size."},
+ {"intent": "delivery", "keywords": ["lagos", "mainland", "island"], "answer": "Lagos delivery takes 1-2 working days and costs NGN 3,500."},
+ {"intent": "delivery", "keywords": ["abuja", "port", "harcourt", "outside"], "answer": "Outside Lagos we deliver in 3-5 working days via GIG Logistics, from NGN 6,000."},
+ {"intent": "returns", "keywords": ["return", "exchange", "size"], "answer": "You can exchange unworn items within 7 days. Reply with your order number to start."}
+]

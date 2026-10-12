@@ -1,0 +1,274 @@
+{
+  "name": "WhatsApp Support Agent (AI Automation Projects #8)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ]
+      },
+      "id": "bc5b1ec0-1b9e-5b12-b058-c6a66c1b617c",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "23f170fe-91ff-5822-8294-ee77048b9263"
+    },
+    {
+      "parameters": {},
+      "id": "ba242ff0-613a-5612-92b5-528d47f92e47",
+      "name": "Test with sample data",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sample data from this repo. Click 'Test workflow' to run the whole flow on it.\nconst sample = [\n {\n  \"from\": \"+2348031110001\",\n  \"text\": \"Hi good morning\"\n },\n {\n  \"from\": \"+2348031110002\",\n  \"text\": \"How much are your sneakers?\"\n },\n {\n  \"from\": \"+2348031110003\",\n  \"text\": \"Where is my order 10234?\"\n },\n {\n  \"from\": \"+2348031110004\",\n  \"text\": \"Do you deliver to Abuja and how long?\"\n },\n {\n  \"from\": \"+2348031110005\",\n  \"text\": \"I received the wrong item and I'm not happy\"\n },\n {\n  \"from\": \"+2348031110006\",\n  \"text\": \"Can I exchange for a bigger size?\"\n },\n {\n  \"from\": \"+2348031110007\",\n  \"text\": \"Do you sell gift cards for corporate clients?\"\n }\n];\nreturn sample.map(json => ({ json }));"
+      },
+      "id": "c65fa148-cd47-599f-aac3-fed9df3e2bb8",
+      "name": "Sample data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WhatsApp Support Agent: core logic (ported from main.py)\nconst FAQ = [\n {\n  \"intent\": \"price\",\n  \"keywords\": [\n   \"sneakers\",\n   \"shoe\",\n   \"shoes\"\n  ],\n  \"answer\": \"Our sneakers start from NGN 25,000. Full price list: https://example.com/prices\"\n },\n {\n  \"intent\": \"price\",\n  \"keywords\": [\n   \"bag\",\n   \"bags\",\n   \"tote\"\n  ],\n  \"answer\": \"Bags range from NGN 18,000 to NGN 45,000 depending on size.\"\n },\n {\n  \"intent\": \"delivery\",\n  \"keywords\": [\n   \"lagos\",\n   \"mainland\",\n   \"island\"\n  ],\n  \"answer\": \"Lagos delivery takes 1-2 working days and costs NGN 3,500.\"\n },\n {\n  \"intent\": \"delivery\",\n  \"keywords\": [\n   \"abuja\",\n   \"port\",\n   \"harcourt\",\n   \"outside\"\n  ],\n  \"answer\": \"Outside Lagos we deliver in 3-5 working days via GIG Logistics, from NGN 6,000.\"\n },\n {\n  \"intent\": \"returns\",\n  \"keywords\": [\n   \"return\",\n   \"exchange\",\n   \"size\"\n  ],\n  \"answer\": \"You can exchange unworn items within 7 days. Reply with your order number to start.\"\n }\n];\nconst ORDERS = {\n \"10234\": {\n  \"status\": \"out for delivery\",\n  \"eta\": \"today before 6pm\"\n },\n \"10235\": {\n  \"status\": \"being packed\",\n  \"eta\": \"tomorrow\"\n },\n \"10198\": {\n  \"status\": \"delivered on 2026-10-03\"\n }\n};\n// ---- input normaliser (works for Webhook, Form, WhatsApp, Gmail, Sheets and sample data)\nconst input = $input.all().flatMap(i => {\n  const j = i.json || {};\n  if (j.messages && Array.isArray(j.messages)) {           // WhatsApp Trigger\n    return j.messages.filter(m => m.text).map(m => ({ from: '+' + m.from, text: m.text.body }));\n  }\n  if (j.Subject !== undefined || j.From !== undefined) {     // Gmail Trigger (simple)\n    return [{ from: (j.From || '').replace(/.*<|>.*/g, ''), subject: j.Subject || '', body: j.snippet || j.text || '' }];\n  }\n  const b = (j.body !== undefined && j.headers !== undefined) ? j.body : j;   // Webhook wraps payload in body\n  if (Array.isArray(b)) return b;\n  if (b && Array.isArray(b.items)) return b.items;\n  return [b];\n});\n\nconst INTENTS = { complaint: ['not happy', 'complain', 'terrible', 'refund', 'wrong item', 'damaged', 'angry', 'scam'],\n  order_status: ['order', 'where is my', 'track', 'status', 'delivered yet'], price: ['price', 'how much', 'cost'],\n  delivery: ['deliver', 'shipping', 'lagos', 'abuja', 'how long'], returns: ['return', 'exchange'],\n  greeting: ['hello', 'hi', 'good morning', 'good afternoon'] };\nconst classify = t => { t = t.toLowerCase();\n  for (const [k, ws] of Object.entries(INTENTS)) if (ws.some(w => t.includes(w))) {\n    if (k === 'order_status' && !/\\d{4,}/.test(t) && !t.includes('where is my')) continue; return k; }\n  return 'unknown'; };\nconst out = [];\nfor (const m of input) {\n  const text = m.text || '', intent = classify(text);\n  let reply, handover = false;\n  if (intent === 'order_status') { const n = (text.match(/(\\d{4,})/) || [])[1], o = n && ORDERS[n];\n    reply = o ? `Order ${n} is ${o.status}${o.eta ? ', expected ' + o.eta : ''}.` : \"Please send your order number (e.g. 10234) and I'll check it right away.\"; }\n  else if (['complaint', 'unknown'].includes(intent)) { handover = true; reply = \"I'm sorry about this. I've passed your message to our team, who will reply shortly.\"; }\n  else if (intent === 'greeting') reply = 'Hi! How can we help today? You can ask about prices, delivery or your order.';\n  else { const ws = new Set(text.toLowerCase().match(/[a-z]+/g) || []); const c = FAQ.filter(f => f.intent === intent);\n    const best = c.sort((a, b) => b.keywords.filter(k => ws.has(k)).length - a.keywords.filter(k => ws.has(k)).length)[0];\n    reply = best ? best.answer : null; handover = !best; }\n  out.push({ route: handover ? 'handover' : 'reply', to: m.from, intent, customer_message: text, message: reply });\n}\nreturn out.map(json => ({ json }));\n"
+      },
+      "id": "420fd852-7fa8-5561-81ad-c4908ae423a7",
+      "name": "Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0ec64c85-e4fb-5ebf-86b6-ab7d5c315de1",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3695d574-8768-5a07-8016-b5e387262eb6",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "handover",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "handover"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ec853109-506e-5b99-ae89-64d3c7f2f3ca",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "={{ $json.to }}",
+        "textBody": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "id": "09a4dcf1-33b2-5c12-ace6-933d10d484c7",
+      "name": "Reply on WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        980,
+        -60
+      ],
+      "webhookId": "09a4dcf1-33b2-5c12-ace6-933d10d484c7"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "recipientPhoneNumber": "={{ $json.to }}",
+        "textBody": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "id": "7b0d635f-6025-5c9e-8e80-05b744c7f525",
+      "name": "Send holding reply",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        980,
+        120
+      ],
+      "webhookId": "7b0d635f-6025-5c9e-8e80-05b744c7f525"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#support",
+          "mode": "name"
+        },
+        "text": "=WhatsApp {{ $json.to }} needs a person ({{ $json.intent }}): {{ $json.customer_message }}",
+        "otherOptions": {}
+      },
+      "id": "4d007a33-c083-537c-842d-e0571e28bbcf",
+      "name": "Hand over to a human (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        980,
+        300
+      ],
+      "webhookId": "4d007a33-c083-537c-842d-e0571e28bbcf"
+    },
+    {
+      "parameters": {
+        "content": "## WhatsApp Support Agent\nAnswers routine customer questions in seconds from your own FAQ and order data, and hands complaints to a person with the full context.\n\nIncoming WhatsApp messages are classified (order status, price, delivery, returns, complaint, greeting). Known questions are answered from YOUR FAQ, order numbers are looked up, and complaints or unknowns go to a human on Slack. Replace the FAQ and ORDERS constants, or swap ORDERS for an HTTP call to your store.\n\n**Try it:** click *Test workflow* to run on the sample data. Then connect your credentials on the output nodes and activate.\n\nCode and docs: github.com/Princewill106/whatsapp-support-agent",
+        "height": 340,
+        "width": 420,
+        "color": 5
+      },
+      "id": "3eb41980-423d-5cd9-bc7c-86f398513b4b",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -460
+      ]
+    }
+  ],
+  "connections": {
+    "Test with sample data": {
+      "main": [
+        [
+          {
+            "node": "Sample data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample data": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logic": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Reply on WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send holding reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hand over to a human (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
